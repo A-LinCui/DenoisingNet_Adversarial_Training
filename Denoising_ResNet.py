@@ -163,16 +163,11 @@ class Denoising_ResNet(nn.Module):
     def forward(self, x):
         out = F.relu(self.bn1(self.conv1(x)))
         out = self.denoising_box1(out)
-        print(out.shape)
         out = self.layer1(out)
         out = self.denoising_box2(out)
-        print(out.shape)
         out = self.layer2(out)
-        print(out.shape)
         out = self.layer3(out)
-        print(out.shape)
         out = self.layer4(out)
-        print(out.shape)
         out = F.avg_pool2d(out, 4)
         out = out.view(out.size(0), -1)
         out = self.linear(out)
@@ -213,4 +208,4 @@ def test():
     y = net(torch.randn(2, 3, 32, 32))
     print(y.shape)
 
-test()
+# test()
