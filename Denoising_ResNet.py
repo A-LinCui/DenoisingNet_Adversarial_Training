@@ -37,6 +37,7 @@ class BasicBlock(nn.Module):
         out = F.relu(out)
         return out
 
+
 class Bottleneck(nn.Module):
     expansion = 4
 
@@ -64,6 +65,7 @@ class Bottleneck(nn.Module):
         out = F.relu(out)
         return out
 
+
 class ResNet(nn.Module):
     def __init__(self, block, num_blocks, num_classes=10):
         super(ResNet, self).__init__()
@@ -87,19 +89,15 @@ class ResNet(nn.Module):
 
     def forward(self, x):
         out = F.relu(self.bn1(self.conv1(x)))
-        print(out.shape)
         out = self.layer1(out)
-        print(out.shape)
         out = self.layer2(out)
-        print(out.shape)
         out = self.layer3(out)
-        print(out.shape)
         out = self.layer4(out)
-        print(out.shape)
         out = F.avg_pool2d(out, 4)
         out = out.view(out.size(0), -1)
         out = self.linear(out)
         return out
+
 
 class Mean_Filter(nn.Module):
     def __init__(self, k_size):
@@ -109,20 +107,43 @@ class Mean_Filter(nn.Module):
             print('Warning: k_size must be odd!')
 
     def forward(self, x):
+        new_x = torch.zeros_like(x)
         for i in range(x.shape[0]):
             for j in range(x.shape[1]):
-                final_output = torch.zeros_like(x[i][j])
                 for m in range(x.shape[2]):
                     for n in range(x.shape[3]):
                         total = 0
-                        for k in range(m - int((self.k_size - 1) / 2), m + 1 + int((self.k_size - 1) / 2)):
-                            for g in range(n - int((self.k_size - 1) / 2), n + 1 + int((self.k_size - 1) / 2)):
-                                if not(k < 0 or k >= x.shape[2] or g < 0 or g >= x.shape[3]):
-                                    total += 1
-                                    final_output[m][n] += x[i][j][k][g]
-                        final_output[m][n] /= total
-                x[i][j] = final_output
-        return x
+                        for k in range(max(m - int((self.k_size - 1) / 2), 0), min(m + 1 + int((self.k_size - 1) / 2), x.shape[2])):
+                            for g in range(max(n - int((self.k_size - 1) / 2), 0), min(n + 1 + int((self.k_size - 1) / 2), x.shape[3])):
+                                total += 1
+                                new_x[i][j][m][n] += x[i][j][k][g]
+                        new_x[i][j][m][n] /= total
+        return new_x
+
+
+class Median_Filter(nn.Module):
+    def __init__(self, k_size):
+        super(Median_Filter, self).__init__()
+        self.k_size = k_size
+        if k_size % 2 == 0:
+            print('Warning: k_size must be odd!')
+
+    def forward(self, x):
+        new_x = torch.zeros_like(x)
+        for i in range(x.shape[0]):
+            for j in range(x.shape[1]):
+                for m in range(x.shape[2]):
+                    for n in range(x.shape[3]):
+                        total = 0
+                        candidates = torch.zeros((min(m + 1 + int((self.k_size - 1) / 2), x.shape[2]) - max(m - int((self.k_size - 1) / 2), 0)) * (min(n + 1 + int((self.k_size - 1) / 2), x.shape[3]) - max(n - int((self.k_size - 1) / 2), 0)), 1)
+                        for k in range(max(m - int((self.k_size - 1) / 2), 0), min(m + 1 + int((self.k_size - 1) / 2), x.shape[2])):
+                            for g in range(max(n - int((self.k_size - 1) / 2), 0), min(n + 1 + int((self.k_size - 1) / 2), x.shape[3])):
+                                candidates[total] = x[i][j][k][g]
+                                total += 1
+                        candidates, _ = torch.sort(candidates)
+                        new_x[i][j][m][n] = candidates[int((candidates.shape[0] - 1) / 2)]
+        return new_x
+
 
 class denoising_box(nn.Module):
     def __init__(self, in_planes, ksize, filter_type):
@@ -130,13 +151,17 @@ class denoising_box(nn.Module):
         self.in_planes = in_planes
         if filter_type == 'Mean_Filter':
             self.filter = Mean_Filter(ksize)
+        elif filter_type == 'Median_Filter':
+            self.filter = Median_Filter(ksize)
         self.conv = nn.Conv2d(in_channels=in_planes, out_channels=in_planes, kernel_size=1, stride=1, padding=0)
 
     def forward(self, x):
+        new_x = x
         x_denoised = self.filter(x)
         x_denoised = self.conv(x_denoised)
-        x += x_denoised
-        return x
+        new_x = x + x_denoised
+        return new_x
+
 
 class Denoising_ResNet(nn.Module):
     def __init__(self, filter_type, block, num_blocks, num_classes=10):
@@ -173,6 +198,7 @@ class Denoising_ResNet(nn.Module):
         out = self.linear(out)
         return out
 
+
 def ResNet18():
     return ResNet(BasicBlock, [2, 2, 2, 2])
 
@@ -204,8 +230,30 @@ def Denoising_ResNet152():
     return Denoising_ResNet("Mean_Filter", Bottleneck, [3, 8, 36, 3])
 
 def test():
+    from torch.autograd import Variable
     net = Denoising_ResNet18()
-    y = net(torch.randn(2, 3, 32, 32))
-    print(y.shape)
+    x = Variable(torch.randn(1, 3, 32, 32), requires_grad=True)
+    y = net(x)
+    y.backward(x)
+
+def filter_test():
+    from torch.autograd import Variable
+    filter = Median_Filter(3)
+    x = Variable(torch.randn(1, 3, 32, 32), requires_grad=True)
+    y = filter(x)
+    print(y)
+    y.backward(x)
+    print(x.grad)
+
+def denoising_box_test():
+    from torch.autograd import Variable
+    denoising_box1 = denoising_box(in_planes=32, ksize=3, filter_type='Mean_Filter')
+    x = Variable(torch.randn(1, 32, 32, 32), requires_grad=True)
+    y = denoising_box1(x)
+    print(y)
+    y.backward(x)
+    print(x.grad)
 
 # test()
+# filter_test()
+denoising_box_test()
