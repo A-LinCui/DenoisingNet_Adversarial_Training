@@ -3,6 +3,7 @@
 import numpy as np
 import argparse
 import csv
+import os
 import matplotlib.pyplot as plt
 
 import torch
@@ -15,20 +16,24 @@ import torch.utils.data.dataloader as Data
 import torch.nn as nn
 from torch.nn import DataParallel
 
-from Denoising_ResNet import Denoising_ResNet18
+from Denoising_ResNet import ResNet18
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "0, 1, 2, 3"
+os.environ["CUDA_VISIBLE_DEVICES"] = "2"
 
 parser = argparse.ArgumentParser()
 
-parser.add_argument('--model', type=str, default='ResNet18', help="model: WideResNet / ResNet18,34,50,101,152 / DenseNet121,169,201,161 / DPN26,92 / EfficientNetB0 / GoogLeNet / LeNet / MobileNet / MobileNetV2 / PNASNetA,B / PreActResNet18,34,50,101,152 / ResNeXt29_2x64d / ResNeXt29_4x64d / ResNeXt29_8x64d / ResNeXt29_32x4d / SENet18 / ShuffleNetG2,G3 / ShuffleNetV2 / VGG11,13,16,19")
+parser.add_argument('--whether_denoising', type=bool, default=False, help="whether to add denoising block")
+parser.add_argument('--filter_type', type=str, default='Mean_Filter', help="filter type")
+parser.add_argument('--ksize', type=int, default=3, help="kernel size of the filter")
 parser.add_argument('--learning_rate', type=float, default=1e-3, help="learning_rate")
-parser.add_argument('--epochs', type=int, default=200, help="epoch")
+parser.add_argument('--epochs', type=int, default=100, help="epoch")
 parser.add_argument('--batch_size', type=int, default=64, help="batch size")
 parser.add_argument('--num_workers', type=int, default=32, help="num_workers")
+parser.add_argument('--GPU', type=str, default='0', help="used GPU")
 
 args = parser.parse_args()
 
+os.environ["CUDA_VISIBLE_DEVICES"] = args.GPU
 def test(model, testloader, criterion):
     model.eval()
     correct, total, loss, counter = 0, 0, 0, 0
@@ -65,11 +70,8 @@ testloader = torch.utils.data.DataLoader(testset, batch_size=64, shuffle=False, 
 
 classes = ('plane', 'car', 'bird', 'cat', 'deer', 'dog', 'frog', 'horse', 'ship', 'truck')
 
-# Get the device
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-print(device)
-
-model = Denoising_ResNet18()
+# Establish the model
+model = ResNet18(whether_denoising=args.whether_denoising, filter_type=args.filter_type, ksize=args.ksize)
 model = model.cuda()
 model = nn.DataParallel(model)
 
@@ -78,11 +80,12 @@ params = list(model.parameters())
 optimizer = optim.SGD(params, lr=args.learning_rate, weight_decay=1e-4, momentum=0.9, nesterov=True)
 scheduler = MultiStepLR(optimizer, milestones=[int(args.epochs/2), int(args.epochs*3/4), int(args.epochs*7/8)], gamma=0.1)
 
-with open(args.model + 'training_log.csv', 'w') as f:
+with open(str(args.whether_denoising) + args.filter_type + str(args.ksize) + 'training_log.csv', 'w') as f:
     writer = csv.writer(f)
-    writer.writerow(["epoch", "iteration", "train_loss", "val_loss", "acc", "val_acc"])
+    writer.writerow(["epoch", "train_loss", "val_loss", "acc", "val_acc"])
 
-i, total, correct, train_loss, counter = 0, 0, 0, 0, 0
+total, correct, train_loss = 0, 0, 0
+best_acc, best_epoch = 0, 0
 
 for epoch in range(args.epochs):
     for data in trainloader:
@@ -100,15 +103,18 @@ for epoch in range(args.epochs):
         total += labels.shape[0]
         correct += (predicted == labels).sum().item()
         train_loss += loss.item()
-        counter += 1
-        i += 1
-        if i % 400 == 0:
-            acc = correct / total
-            train_loss /= counter
-            val_loss, val_acc = test(model, testloader, criterion)
-            with open(args.model + 'training_log.csv', 'a') as f:
-                writer = csv.writer(f)
-                writer.writerow([epoch, i, train_loss, val_loss, acc, val_acc])
-            print("epoch:{}, i:{}, train_loss:{:.3f}, train_acc:{:.3f}, val_loss:{:.3f}, val_acc:{:.3f}".format(epoch, i, train_loss, acc, val_loss, val_acc))
-            correct, total, train_loss, counter = 0, 0, 0, 0
-        torch.save(model.state_dict(), args.model + '.pkl')
+    
+    acc = correct / total
+    train_loss /= total
+    val_loss, val_acc = test(model, testloader, criterion)
+    
+    with open(str(args.whether_denoising) + args.filter_type + str(args.ksize) + 'training_log.csv', 'a') as f:
+         writer = csv.writer(f)
+         writer.writerow([epoch, train_loss, val_loss, acc, val_acc])
+    print("epoch:{}, train_loss:{:.3f}, train_acc:{:.3f}, val_loss:{:.3f}, val_acc:{:.3f}".format(epoch, train_loss, acc, val_loss, val_acc))
+    correct, total, train_loss = 0, 0, 0
+    if best_acc < val_acc:
+        best_acc = val_acc
+        best_epoch = epoch
+        torch.save(model.state_dict(), str(args.whether_denoising) + args.filter_type + str(args.ksize) + '.pkl')
+    print("Best model at present: val_acc={:.3f}  best_epoch={}".format(best_acc, best_epoch))

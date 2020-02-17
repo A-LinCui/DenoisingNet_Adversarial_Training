@@ -80,14 +80,13 @@ class denoising_block(nn.Module):
         self.conv = nn.Conv2d(in_channels=in_planes, out_channels=in_planes, kernel_size=1, stride=1, padding=0)
 
     def forward(self, x):
-        new_x = x
         if self.filter_type == 'Median_Filter':
             x_denoised = kornia.median_blur(x, (self.ksize, self.ksize))
         elif self.filter_type == 'Mean_Filter':
             x_denoised = kornia.box_blur(x, (self.ksize, self.ksize))
         elif self.filter_type == 'Gaussian_Filter':
             x_denoised = kornia.gaussian_blur2d(x, (self.ksize, self.ksize), (0.3 * ((x.shape[3] - 1) * 0.5 - 1) + 0.8, 0.3 * ((x.shape[2] - 1) * 0.5 - 1) + 0.8))
-        new_x = x + x_denoised
+        new_x = x + self.conv(x_denoised)
         return new_x
 
 class ResNet(nn.Module):
