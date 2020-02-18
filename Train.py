@@ -47,7 +47,7 @@ def test(model, testloader, criterion):
             correct += (predicted == labels).sum().item()
             loss += criterion(outputs, labels).item()
             counter += 1
-    return loss / counter, correct / total
+    return loss / total, correct / total
 
 # Set the transformation
 transform_train = transforms.Compose([

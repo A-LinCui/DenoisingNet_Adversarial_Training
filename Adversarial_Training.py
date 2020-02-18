@@ -162,6 +162,9 @@ for epoch in range(args.epoches):
         adversarial_orig_labels = torch.Tensor(adversarial_orig_labels).cuda()
 
         # Adversarial Training Both on Adversarial Examples and Clean Inputs
+        if len(adversarial_images.shape) != 4:
+            continue
+
         model.train()
         adv_outputs = model(adversarial_images)
         adv_loss = criterion(adv_outputs, adversarial_orig_labels.long())
@@ -222,6 +225,7 @@ for epoch in range(args.epoches):
     plt.title("training accuracy")
     plt.legend()
     plt.savefig(args.model_address + "_adv_train_accuracy.png")
+    plt.close(0)
 
     # Generate the training loss line
     plt.figure(num=1)
@@ -235,3 +239,4 @@ for epoch in range(args.epoches):
     plt.title("training loss on the trainset")
     plt.legend()
     plt.savefig(args.model_address + "_adv_train_loss.png")
+    plt.close(1)
